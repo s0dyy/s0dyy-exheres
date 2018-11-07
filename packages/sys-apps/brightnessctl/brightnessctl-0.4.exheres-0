@@ -1,0 +1,31 @@
+# Copyright 2018 Danilo Spinella <danyspin97@protonmail.com>
+# Distributed under the terms of the GNU General Public License v2
+
+require github [ user='Hummer12007' ]
+
+SUMMARY="A program to read and control device brightness."
+
+LICENCES="MIT"
+SLOT="0"
+PLATFORMS="~amd64"
+MYOPTIONS="
+    udev [[ description = [ Install additional udev rules ] ]]
+"
+
+DEPENDENCIES=""
+
+DEFAULT_SRC_INSTALL_PARAMS=(
+    BINDIR=${IMAGE}/usr/$(exhost --target)/bin
+    MANDIR=${IMAGE}/usr/share/man
+    UDEVDIR=/usr/$(exhost --target)/lib/udev/rules.d
+)
+
+pkg_postint() {
+    if ! optionq udev; then
+        return
+    fi
+
+    elog "Add a user to the input group"
+    elog "to use this tool without being root"
+}
+
