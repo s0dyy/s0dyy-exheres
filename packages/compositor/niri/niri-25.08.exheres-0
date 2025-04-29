@@ -1,0 +1,89 @@
+# Copyright 2025 Maxime Sorin <maxime.sorin@clever.cloud.com>
+# Distributed under the terms of the GNU General Public License v2
+
+require cargo [ disable_default_features=true ]
+require github [ user='YaLTeR' tag=v${PV} ]
+require systemd-service [ systemd_files=[ ] systemd_user_files=[ resources/${PN}.service resources/${PN}-shutdown.target ] ]
+
+SUMMARY="A scrollable-tiling Wayland compositor"
+
+LICENCES="GPL-3"
+SLOT="0"
+PLATFORMS="~amd64"
+MYOPTIONS="
+    screencast [[ description = [ Support for sharing your screen using xdg-desktop-portal ] ]]
+    xwayland [[ description = [ A compatibility layer for legacy X11 applications on wayland ] ]]
+    ( providers: systemd )
+"
+
+DEPENDENCIES="
+    build+run:
+        dev-libs/glib:2
+        dev-libs/libdisplay-info
+        sys-auth/seatd
+        sys-libs/libinput
+        sys-libs/wayland-protocols
+        sys-libs/wayland
+        x11-dri/mesa
+        x11-libs/cairo
+        x11-libs/libxkbcommon
+        x11-libs/pango
+        x11-libs/pixman:1
+        screencast? (
+            media/pipewire
+            sys-apps/xdg-desktop-portal
+        )
+        xwayland? ( wayland-apps/xwayland-satellite )
+        providers:systemd? ( sys-apps/systemd )
+    suggestion:
+        x11-apps/alacritty [[
+            description = [ A cross-platform, GPU-accelerated terminal emulator ]
+        ]]
+        wayland-apps/swaybg [[
+            description = [ Wallpaper tool for Wayland compositors ]
+        ]]
+        wayland-apps/swaylock [[
+            description = [ Screen locker for Wayland ]
+        ]]
+        wayland-apps/Waybar [[
+            description = [ Highly customizable Wayland bar for wlroots based compositors ]
+        ]]
+"
+
+ECARGO_FEATURE_ENABLES=(
+    'providers:systemd systemd'
+    'screencast xdp-gnome-screencast'
+)
+
+# Need access to /dev/dri/renderD128
+CARGO_SRC_TEST_PARAMS=(
+  --
+  --skip egl_height_resize_animates_next_y 
+  --skip egl_clientside_height_change_doesnt_animate
+)
+
+src_install() {
+    cargo_src_install
+
+    dobin resources/${PN}-session
+
+    dodir /etc/${PN}
+    edo mv resources/default-config.kdl "${IMAGE}"/etc/${PN}/config.kdl
+
+    insinto /usr/share/wayland-sessions
+    doins resources/${PN}.desktop
+
+    if option screencast; then
+        insinto /usr/share/dbus-1/interfaces
+        doins resources/mutter-x11-interop.xml
+
+        insinto /usr/share/xdg-desktop-portal/portals
+        doins resources/niri-portals.conf
+    fi
+
+    insinto /usr/share/${PN}
+    doins resources/cursor.rgba
+
+    install_systemd_files
+}
+
