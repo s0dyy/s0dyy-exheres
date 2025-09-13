@@ -1,0 +1,52 @@
+# Copyright 2025 Julien Durillon <julien.durillon@clever.cloud>
+# Copyright 2025 Maxime Sorin <maxime.sorin@clever.cloud>
+# Distributed under the terms of the GNU General Public License v2
+
+require cargo
+require systemd-service [ systemd_files=[ ] systemd_user_files=[ "resources/${PN}.service" ] ]
+require github [ user=Supreeeme tag="v${PV}" ]
+
+SUMMARY="Rootless Xwayland integration to any Wayland compositor implementing xdg_wm_base"
+HOMEPAGE="https://github.com/Supreeeme/${PN}"
+
+LICENCES="MPL-2.0"
+SLOT="0"
+PLATFORMS="~amd64"
+
+MYOPTIONS="
+  ( providers: systemd )
+"
+
+DEPENDENCIES="
+    build+run:
+        x11-libs/libxcb
+        x11-utils/xcb-util-cursor
+        providers:systemd? ( sys-apps/systemd )
+"
+
+ECARGO_FEATURE_ENABLES=(
+  'providers:systemd systemd'
+)
+
+src_test() {
+  esandbox allow_net --bind "unix:${TEMP%/}/xwls-*"
+  esandbox allow_net --bind 'unix:/tmp/.X11-unix/*'
+  esandbox allow_net --bind 'unix-abstract:/tmp/.X11-unix/*'
+
+  cargo_src_test
+
+  esandbox disallow_net --bind "unix:${TEMP%/}/xwls-*"
+  esandbox disallow_net --bind 'unix:/tmp/.X11-unix/*'
+  esandbox disallow_net --bind 'unix-abstract:/tmp/.X11-unix/*'
+}
+
+src_install() {
+  cargo_src_install
+
+  edo sed -i \
+    "s:\(ExecStart=\).*$:\1/usr/$(exhost --target)/bin/${PN}:" \
+    "${WORK}/resources/${PN}.service"
+
+  install_systemd_files
+}
+
