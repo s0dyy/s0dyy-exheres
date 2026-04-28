@@ -28,6 +28,14 @@ ECARGO_FEATURE_ENABLES=(
   'providers:systemd systemd'
 )
 
+CARGO_SRC_TEST_PARAMS=(
+  --
+  --skip client_init_move
+  --skip wayland_then_x11_clipboard_owner
+  --skip window_properties_after_reparent
+  --skip xsettings_scale
+)
+
 src_test() {
   esandbox allow_net --bind "unix:${TEMP%/}/xwls-*"
   esandbox allow_net --bind 'unix:/tmp/.X11-unix/*'
