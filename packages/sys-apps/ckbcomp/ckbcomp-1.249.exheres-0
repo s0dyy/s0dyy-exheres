@@ -1,0 +1,37 @@
+# Copyright 2026 Maxime Sorin <maxime.sorin@clever.cloud>
+# Distributed under the terms of the GNU General Public License v2
+
+require gitlab [ prefix=https://salsa.debian.org user=installer-team pn=console-setup new_download_scheme=true tag=${PV} ]
+
+SUMMARY="Compile an XKB keyboard layout into a console keymap"
+DESCRIPTION="
+ckbcomp is the keymap compiler shipped with Debian's console-setup. It
+translates an XKB keyboard description, as provided by xkeyboard-config, into a
+keymap suitable for loadkeys(1) on Linux or kbdcontrol(1) on FreeBSD, without
+needing a running X server.
+"
+
+LICENCES="GPL-2"
+SLOT="0"
+PLATFORMS="~amd64"
+MYOPTIONS=""
+
+# Upstream ships no test suite
+RESTRICT="test"
+
+DEPENDENCIES="
+    run:
+        dev-lang/perl:*
+        x11-apps/xkeyboard-config
+"
+
+# Only the ckbcomp script is installed, the console-setup build system is not used
+src_compile() {
+    :
+}
+
+src_install() {
+    newbin Keyboard/ckbcomp ${PN}
+    doman man/${PN}.1
+    dodoc FAQ README
+}
