@@ -1,0 +1,74 @@
+# Copyright 2026 Maxime Sorin <maxime.sorin@clever.cloud>
+# Distributed under the terms of the GNU General Public License v2
+
+SUMMARY="Linux console keymaps for the Ergo-L keyboard layout"
+DESCRIPTION="
+Keymaps compiled from the Ergo-L XKB layout with ckbcomp, so that it is also
+available on the Linux console and in the initramfs, where XKB is not an option.
+Both upstream variants are installed, each also in a _nocaps flavour that maps
+CapsLock to Control the way the ctrl:nocaps XKB option does. They are named after
+the XKB variant they come from, under the fr- prefix kbd uses for its own French
+keymaps, so KEYMAP=fr-ergol_nocaps and friends resolve.
+
+The 1dk layer cannot be carried over: the console knows nothing of ISO_Level5,
+so the accented characters sitting on levels 5 and 6 are lost, and the key
+itself becomes a second AltGr. All printable ASCII remains reachable.
+"
+HOMEPAGE="https://ergol.org"
+DOWNLOADS=""
+
+# The keymaps are a derived work of xkeyboard-config's layout data
+LICENCES="MIT"
+SLOT="0"
+PLATFORMS="~amd64"
+MYOPTIONS=""
+
+# Generated from the installed xkeyboard-config, so this has to be rebuilt to
+# pick up layout changes shipped by a newer one
+DEPENDENCIES="
+    build:
+        sys-apps/ckbcomp
+        x11-apps/xkeyboard-config
+"
+
+WORK="${WORKBASE}"
+
+src_compile() {
+    local variant
+    for variant in ergol ergol_iso; do
+        edo ckbcomp -layout fr -variant ${variant} > fr-${variant}.map
+        edo ckbcomp -layout fr -variant ${variant} -option ctrl:nocaps \
+            > fr-${variant}_nocaps.map
+    done
+
+    edo gzip -9 fr-*.map
+}
+
+src_install() {
+    # loadkeys searches /usr/share/keymaps recursively, and dracut's i18n module
+    # looks for $KEYMAP.map* under the very same directory
+    insinto /usr/share/keymaps/i386/ergol
+    doins fr-*.map.gz
+}
+
+pkg_postinst() {
+    elog "For the text consoles, set KEYMAP in /etc/vconsole.conf to one of"
+    elog "fr-ergol, fr-ergol_nocaps, fr-ergol_iso or fr-ergol_iso_nocaps."
+    elog ""
+    elog "The plymouth passphrase prompt ignores these keymaps entirely: it reads"
+    elog "the input devices itself and translates them through XKB, taking its"
+    elog "layout from XKBLAYOUT, XKBVARIANT and XKBOPTIONS in the very same file:"
+    elog ""
+    elog "    XKBLAYOUT=fr"
+    elog "    XKBVARIANT=ergol"
+    elog "    XKBOPTIONS=ctrl:nocaps"
+    elog ""
+    elog "XKBVARIANT is the one that matters: with XKBLAYOUT=fr alone you get plain"
+    elog "AZERTY, not Ergo-L. These three map onto xkbcommon's XKB_DEFAULT_LAYOUT,"
+    elog "XKB_DEFAULT_VARIANT and XKB_DEFAULT_OPTIONS, but plymouth wants them in"
+    elog "/etc/vconsole.conf, and it skips its input devices when XKBLAYOUT is unset."
+    elog ""
+    elog "Regenerate the initramfs afterwards, since it carries its own copy of"
+    elog "/etc/vconsole.conf. Being real XKB, that path keeps the 1dk layer, so the"
+    elog "accented characters lost from the console keymaps are typable there."
+}
