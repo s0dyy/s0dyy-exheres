@@ -1,0 +1,209 @@
+# Copyright 2026 Maxime Sorin <maxime.sorin@clever.cloud>
+# Distributed under the terms of the GNU General Public License v2
+
+require gtk-icon-cache freedesktop-desktop
+
+SUMMARY="Desktop application for Claude.ai"
+HOMEPAGE="https://claude.ai"
+# Anthropic publishes only a Debian package; the pool path is stable and versioned.
+# The current version is the last Version: field of
+#     https://downloads.claude.ai/claude-desktop/apt/stable/dists/stable/main/binary-amd64/Packages
+DOWNLOADS="https://downloads.claude.ai/claude-desktop/apt/stable/pool/main/c/claude-desktop/claude-desktop_${PV}_amd64.deb"
+
+LICENCES="all-rights-reserved"
+SLOT="0"
+PLATFORMS="~amd64"
+MYOPTIONS="
+    apparmor [[
+        description = [ Install an unconfined AppArmor profile allowlisting the app for
+            unprivileged user namespaces, which Chromium sandboxes itself with. Only needed
+            where AppArmor >= 4.0 restricts them, which Exherbo does not do by default ]
+    ]]
+    cowork [[
+        description = [ Pull in the virtualisation stack the Cowork tab runs its tasks in.
+            It also needs hardware virtualisation and membership of the kvm group ]
+    ]]
+    gnome [[
+        description = [ Register the GNOME Shell search provider ]
+    ]]
+    suid-sandbox [[
+        description = [ Install the Chromium SUID sandbox helper setuid root. Only needed
+            when the kernel provides no unprivileged user namespaces, which Chromium uses
+            in preference; check with: unshare --user --map-root-user true ]
+    ]]
+    ( providers: eudev systemd ) [[ number-selected = exactly-one ]]
+"
+
+RESTRICT="mirror strip test"
+
+DEPENDENCIES="
+    run:
+        app-misc/ca-certificates
+        dev-libs/at-spi2-core[>=2.52.0]
+        dev-libs/expat
+        dev-libs/glib:2
+        dev-libs/libsecret:1
+        dev-libs/nspr
+        dev-libs/nss
+        media-libs/fontconfig
+        net-print/cups
+        sys-apps/dbus
+        sys-apps/xdg-desktop-portal
+        sys-libs/glibc
+        sys-libs/libcap-ng
+        sys-libs/libgcc:*
+        sys-libs/libseccomp
+        sys-sound/alsa-lib
+        x11-apps/xdg-utils
+        x11-dri/mesa
+        x11-libs/cairo
+        x11-libs/gdk-pixbuf:2.0
+        x11-libs/gtk+:3
+        x11-libs/libnotify
+        x11-libs/libX11
+        x11-libs/libXcomposite
+        x11-libs/libXcursor
+        x11-libs/libXdamage
+        x11-libs/libXext
+        x11-libs/libXfixes
+        x11-libs/libXrandr
+        x11-libs/libxcb
+        x11-libs/libxkbcommon
+        x11-libs/pango
+        apparmor? ( security/apparmor )
+        cowork? ( app-virtualization/qemu )
+        gnome? ( gnome-bindings/gjs:1 )
+        providers:eudev? ( sys-apps/eudev )
+        providers:systemd? ( sys-apps/systemd )
+    suggestion:
+        gnome-desktop/gnome-keyring [[
+            description = [ Credential storage behind libsecret, used to keep you signed in ]
+        ]]
+"
+
+src_unpack() {
+    # unpack runs ar(1) on a .deb, which leaves the payload as a tarball behind
+    default
+    edo mkdir "${WORK}"
+    edo tar -xJf "${WORKBASE}"/data.tar.xz -C "${WORK}"
+}
+
+pkg_setup() {
+    exdirectory --allow /opt
+}
+
+src_install() {
+    local dest=/opt/claude-desktop
+    local upstream=usr/lib/claude-desktop
+
+    exeinto ${dest}
+    doexe ${upstream}/claude-desktop ${upstream}/chrome-sandbox
+    doexe ${upstream}/chrome_crashpad_handler
+    doexe ${upstream}/lib*.so ${upstream}/lib*.so.1
+
+    insinto ${dest}
+    doins ${upstream}/*.pak ${upstream}/*.bin ${upstream}/icudtl.dat
+    doins ${upstream}/vk_swiftshader_icd.json ${upstream}/version
+    doins ${upstream}/LICENSES.chromium.html
+    doins -r ${upstream}/locales ${upstream}/resources
+
+    # doins strips the executable bit the helpers under resources/ need
+    local helper
+    for helper in \
+        app.asar.unpacked/node_modules/@ant/claude-native/claude-native-binding.node \
+        app.asar.unpacked/resources/github-mcp/github-mcp-server \
+        chrome-native-host \
+        claude-browser-shim.js \
+        cowork-linux-helper \
+        virtiofsd
+    do
+        edo chmod +x "${IMAGE}"${dest}/resources/${helper}
+    done
+
+    # Chromium only falls back to this helper, which has to be setuid root, when
+    # unprivileged CLONE_NEWUSER is unavailable. Upstream ships it setuid already.
+    if option suid-sandbox ; then
+        edo chmod 4755 "${IMAGE}"${dest}/chrome-sandbox
+    else
+        edo chmod 755 "${IMAGE}"${dest}/chrome-sandbox
+    fi
+
+    dodir /usr/$(exhost --target)/bin
+    dosym ${dest}/claude-desktop /usr/$(exhost --target)/bin/claude-desktop
+
+    insinto /usr/share/applications
+    doins usr/share/applications/com.anthropic.Claude.desktop
+
+    local size
+    for size in 16 32 48 128 256 ; do
+        insinto /usr/share/icons/hicolor/${size}x${size}/apps
+        doins usr/share/icons/hicolor/${size}x${size}/apps/claude-desktop.png
+    done
+
+    if option gnome ; then
+        insinto /usr/share/gnome-shell/search-providers
+        doins ${upstream}/resources/gnome-search-provider/com.anthropic.Claude.search-provider.ini
+
+        # The D-Bus service file hardcodes the Debian paths of both gjs and the script
+        edo sed \
+            -e "s:/usr/bin/gjs:/usr/$(exhost --target)/bin/gjs:" \
+            -e "s:/usr/lib/claude-desktop:${dest}:" \
+            -i ${upstream}/resources/gnome-search-provider/com.anthropic.Claude.SearchProvider.service
+
+        insinto /usr/share/dbus-1/services
+        doins ${upstream}/resources/gnome-search-provider/com.anthropic.Claude.SearchProvider.service
+    fi
+
+    if option apparmor ; then
+        # flags=(unconfined) does not confine the app, it only allowlists it for userns
+        insinto /etc/apparmor.d
+        hereins claude-desktop <<EOI
+abi <abi/4.0>,
+include <tunables/global>
+
+profile claude-desktop ${dest}/claude-desktop flags=(unconfined) {
+  userns,
+
+  include if exists <local/claude-desktop>
+}
+EOI
+    fi
+}
+
+pkg_postinst() {
+    freedesktop-desktop_pkg_postinst
+    gtk-icon-cache_pkg_postinst
+
+    elog "The Linux app is a beta and does not update itself. Upstream's own package would"
+    elog "register Anthropic's apt repository to do so; this exheres deliberately does not."
+    elog "New versions are listed in the repository index:"
+    elog "    https://downloads.claude.ai/claude-desktop/apt/stable/dists/stable/main/binary-amd64/Packages"
+    elog ""
+    if ! option suid-sandbox ; then
+        elog "chrome-sandbox is installed without the setuid bit: Chromium sandboxes itself"
+        elog "with unprivileged user namespaces. Should Claude abort with \"The SUID sandbox"
+        elog "helper binary was found, but is not configured correctly\", your kernel does not"
+        elog "provide them and the suid-sandbox option is needed."
+        elog ""
+    fi
+    if option apparmor ; then
+        elog "Load the profile with:"
+        elog "    apparmor_parser -r -W -T ${ROOT}/etc/apparmor.d/claude-desktop"
+        elog ""
+    fi
+    if option cowork ; then
+        elog "Cowork runs its tasks in a QEMU/KVM virtual machine. It needs hardware"
+        elog "virtualisation enabled in firmware and your user in the kvm group, which also"
+        elog "grants access to /dev/vhost-vsock. The UEFI firmware it boots (OVMF) is not"
+        elog "packaged for Exherbo; install it by hand if Cowork reports missing firmware."
+        elog "virtiofsd is not needed separately, the app ships its own copy."
+        elog ""
+    fi
+    elog "Computer use, dictation and the Quick Entry hotkey under native Wayland are not"
+    elog "part of the Linux build yet."
+}
+
+pkg_postrm() {
+    freedesktop-desktop_pkg_postrm
+    gtk-icon-cache_pkg_postrm
+}
