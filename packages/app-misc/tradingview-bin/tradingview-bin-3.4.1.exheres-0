@@ -1,0 +1,167 @@
+# Copyright 2026 Maxime Sorin <maxime.sorin@clever.cloud>
+# Distributed under the terms of the GNU General Public License v2
+
+require gtk-icon-cache freedesktop-desktop
+
+SUMMARY="Desktop application for TradingView"
+HOMEPAGE="https://www.tradingview.com/desktop/"
+# TradingView publishes only a rolling "latest" Debian package, with no version in the path
+# and no public index to pin against (the apt repository itself 403s unauthenticated). PV
+# tracks the Version: field of the control file inside the .deb at packaging time; refetching
+# this exheres later than that will not reproduce the exact same file.
+MY_PV="${PV}-1"
+DOWNLOADS="https://tvd-packages.tradingview.com/ubuntu/stable/latest/jammy/tradingview_amd64.deb -> ${PN}-${MY_PV}.deb"
+
+LICENCES="all-rights-reserved"
+SLOT="0"
+PLATFORMS="~amd64"
+MYOPTIONS="
+    apparmor [[
+        description = [ Install an unconfined AppArmor profile allowlisting the app for
+            unprivileged user namespaces, which Chromium sandboxes itself with. Only needed
+            where AppArmor >= 4.0 restricts them, which Exherbo does not do by default ]
+    ]]
+    suid-sandbox [[
+        description = [ Install the Chromium SUID sandbox helper setuid root. Only needed
+            when the kernel provides no unprivileged user namespaces, which Chromium uses
+            in preference; check with: unshare --user --map-root-user true ]
+    ]]
+    ( providers: eudev systemd ) [[ number-selected = exactly-one ]]
+"
+
+RESTRICT="mirror strip test"
+
+DEPENDENCIES="
+    run:
+        app-misc/ca-certificates
+        dev-libs/at-spi2-core[>=2.52.0]
+        dev-libs/expat
+        dev-libs/glib:2
+        dev-libs/libsecret:1
+        dev-libs/nspr
+        dev-libs/nss
+        media-libs/fontconfig
+        net-print/cups
+        sys-apps/dbus
+        sys-apps/xdg-desktop-portal
+        sys-libs/glibc
+        sys-libs/libcap-ng
+        sys-libs/libgcc:*
+        sys-libs/libseccomp
+        sys-sound/alsa-lib
+        x11-apps/xdg-utils
+        x11-dri/mesa
+        x11-libs/cairo
+        x11-libs/gdk-pixbuf:2.0
+        x11-libs/gtk+:3
+        x11-libs/libnotify
+        x11-libs/libX11
+        x11-libs/libXcomposite
+        x11-libs/libXcursor
+        x11-libs/libXdamage
+        x11-libs/libXext
+        x11-libs/libXfixes
+        x11-libs/libXrandr
+        x11-libs/libxcb
+        x11-libs/libxkbcommon
+        x11-libs/pango
+        apparmor? ( security/apparmor )
+        providers:eudev? ( sys-apps/eudev )
+        providers:systemd? ( sys-apps/systemd )
+    suggestion:
+        dev-libs/libappindicator [[
+            description = [ Tray icon support via the Unity/AppIndicator protocol, instead of
+                the deprecated GtkStatusIcon ]
+        ]]
+        gnome-desktop/gnome-keyring [[
+            description = [ Credential storage behind libsecret, used to keep you signed in ]
+        ]]
+"
+
+src_unpack() {
+    # unpack runs ar(1) on a .deb, which leaves the payload as a tarball behind
+    default
+    edo mkdir "${WORK}"
+    edo tar -xzf "${WORKBASE}"/data.tar.gz -C "${WORK}"
+}
+
+pkg_setup() {
+    exdirectory --allow /opt
+}
+
+src_install() {
+    local dest=/opt/TradingView
+    local upstream=opt/TradingView
+
+    exeinto ${dest}
+    doexe ${upstream}/tradingview ${upstream}/chrome-sandbox
+    doexe ${upstream}/chrome_crashpad_handler
+    doexe ${upstream}/lib*.so ${upstream}/libvulkan.so.1
+
+    insinto ${dest}
+    doins ${upstream}/*.pak ${upstream}/icudtl.dat
+    doins ${upstream}/v8_context_snapshot.bin ${upstream}/snapshot_blob.bin
+    doins ${upstream}/vk_swiftshader_icd.json
+    doins ${upstream}/LICENSE.electron.txt ${upstream}/LICENSES.chromium.html
+    doins -r ${upstream}/locales ${upstream}/resources
+
+    # doins strips the executable bit the helpers under resources/ need
+    local helper
+    for helper in \
+        app.asar.unpacked/keytar.node \
+        app.asar.unpacked/native/tvdbridge.node \
+        app.asar.unpacked/build/Release/classic_level.node
+    do
+        edo chmod +x "${IMAGE}"${dest}/resources/${helper}
+    done
+
+    # Chromium only falls back to this helper, which has to be setuid root, when
+    # unprivileged CLONE_NEWUSER is unavailable. Upstream ships it setuid already.
+    if option suid-sandbox ; then
+        edo chmod 4755 "${IMAGE}"${dest}/chrome-sandbox
+    else
+        edo chmod 755 "${IMAGE}"${dest}/chrome-sandbox
+    fi
+
+    dodir /usr/$(exhost --target)/bin
+    dosym ${dest}/tradingview /usr/$(exhost --target)/bin/tradingview
+
+    insinto /usr/share/applications
+    doins usr/share/applications/tradingview.desktop
+
+    insinto /usr/share/icons/hicolor/512x512/apps
+    doins usr/share/icons/hicolor/512x512/apps/tradingview.png
+
+    if option apparmor ; then
+        # flags=(unconfined) does not confine the app, it only allowlists it for userns;
+        # upstream's own profile already uses this exheres' install path verbatim
+        insinto /etc/apparmor.d
+        newins ${upstream}/resources/apparmor-profile tradingview
+    fi
+}
+
+pkg_postinst() {
+    freedesktop-desktop_pkg_postinst
+    gtk-icon-cache_pkg_postinst
+
+    elog "The Linux app does not update itself. Upstream's own package would register"
+    elog "TradingView's apt repository to do so; this exheres deliberately does not."
+    elog ""
+    if ! option suid-sandbox ; then
+        elog "chrome-sandbox is installed without the setuid bit: Chromium sandboxes itself"
+        elog "with unprivileged user namespaces. Should TradingView abort with \"The SUID"
+        elog "sandbox helper binary was found, but is not configured correctly\", your kernel"
+        elog "does not provide them and the suid-sandbox option is needed."
+        elog ""
+    fi
+    if option apparmor ; then
+        elog "Load the profile with:"
+        elog "    apparmor_parser -r -W -T ${ROOT}/etc/apparmor.d/tradingview"
+        elog ""
+    fi
+}
+
+pkg_postrm() {
+    freedesktop-desktop_pkg_postrm
+    gtk-icon-cache_pkg_postrm
+}
