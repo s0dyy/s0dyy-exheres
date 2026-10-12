@@ -115,6 +115,7 @@ src_install() {
         chrome-native-host \
         claude-browser-shim.js \
         cowork-linux-helper \
+        disclaimer \
         virtiofsd
     do
         edo chmod +x "${IMAGE}"${dest}/resources/${helper}
