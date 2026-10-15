@@ -79,6 +79,9 @@ DEPENDENCIES="
         gnome-desktop/gnome-keyring [[
             description = [ Credential storage behind libsecret, used to keep you signed in ]
         ]]
+        net-misc/openssh [[
+            description = [ ssh client used by the Code tab to run sessions on remote machines ]
+        ]]
 "
 
 src_unpack() {
