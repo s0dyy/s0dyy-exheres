@@ -117,6 +117,7 @@ src_install() {
         app.asar.unpacked/resources/github-mcp/github-mcp-server \
         chrome-native-host \
         claude-browser-shim.js \
+        claude-ssh-askpass \
         cowork-linux-helper \
         disclaimer \
         virtiofsd
